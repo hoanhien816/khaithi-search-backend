@@ -1,0 +1,32 @@
+name: Run Scraper Daily
+
+on:
+  schedule:
+    # Chạy scraper mỗi ngày vào lúc 00:00 UTC
+    # Bạn có thể thay đổi lịch trình theo ý muốn.
+    # Ví dụ: '0 */6 * * *' để chạy mỗi 6 giờ
+    - cron: '0 0 * * *'
+  workflow_dispatch: # Cho phép chạy thủ công từ GitHub UI
+
+jobs:
+  scrape:
+    runs-on: ubuntu-latest # Môi trường chạy là Ubuntu Linux
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4 # Lấy mã nguồn từ repository
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.9' # Sử dụng Python 3.9. Bạn có thể thay đổi nếu cần.
+
+    - name: Install dependencies
+      run: pip install -r requirements.txt # Cài đặt các thư viện từ requirements.txt
+
+    - name: Run Scraper
+      run: python scraper.py # Chạy script scraper
+      env:
+        # Lấy DATABASE_URL từ GitHub Secrets
+        # Bạn cần thêm DATABASE_URL vào GitHub Secrets của repository này
+        DATABASE_URL: ${{ secrets.DATABASE_URL }}
