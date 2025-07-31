@@ -1,115 +1,93 @@
+import os
 import requests
 from bs4 import BeautifulSoup
-import psycopg2
 from datetime import datetime
 import re
 import time
-import os
+import json
+from supabase import create_client, Client
 
-# --- Cấu hình Database ---
-# Lấy chuỗi kết nối từ biến môi trường DATABASE_URL
-# Trong môi trường cục bộ, bạn có thể đặt biến này hoặc sử dụng thông tin trực tiếp
-# Ví dụ: export DATABASE_URL="postgresql://khaithi_user:your_strong_password@localhost:5432/khaithi_db"
-# Hoặc thay thế bằng thông tin cục bộ của bạn nếu không dùng biến môi trường khi chạy cục bộ
-# DB_NAME = "khaithi_db"
-# DB_USER = "khaithi_user"
-# DB_PASSWORD = "your_strong_password"
-# DB_HOST = "localhost"
+# --- Cấu hình ---
+# Lấy thông tin kết nối từ biến môi trường của GitHub Actions hoặc môi trường cục bộ
+# Bắt buộc phải có: SUPABASE_URL và SUPABASE_KEY (sử dụng service_role key)
+SUPABASE_URL = os.environ.get("SUPABASE_URL")
+SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
 
-# --- Cấu hình Website ---
 BASE_URL = "https://timkhaithi.pmtl.site"
-RSS_FEED_URL = f"{BASE_URL}/feeds/posts/default?orderby=published&alt=json-in-script&max-results=999" # Có thể tăng max-results nếu cần
-# User-Agent để tránh bị chặn bởi một số website
+RSS_FEED_URL = f"{BASE_URL}/feeds/posts/default?orderby=published&alt=json-in-script&max-results=500"
 HEADERS = {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
 }
 
-def get_db_connection():
-    """Kết nối tới cơ sở dữ liệu PostgreSQL."""
-    database_url = os.environ.get("DATABASE_URL")
-    if not database_url:
-        # Fallback cho môi trường cục bộ nếu biến môi trường không được đặt
-        # Bạn có thể thay thế bằng thông tin kết nối cục bộ của mình
-        print("DATABASE_URL environment variable not set. Attempting local connection.")
-        return psycopg2.connect(
-            dbname="khaithi_db",
-            user="khaithi_user",
-            password="your_strong_password", # THAY THẾ BẰNG MẬT KHẨU CỦA BẠN KHI CHẠY CỤC BỘ
-            host="localhost"
-        )
-    conn = psycopg2.connect(database_url)
-    return conn
+def get_supabase_client():
+    """Khởi tạo và trả về Supabase client."""
+    if not SUPABASE_URL or not SUPABASE_KEY:
+        raise EnvironmentError("Vui lòng đặt biến môi trường SUPABASE_URL và SUPABASE_KEY.")
+    return create_client(SUPABASE_URL, SUPABASE_KEY)
 
 def get_article_urls_from_feed():
-    """Lấy danh sách URL bài viết từ RSS feed của Blogger."""
+    """Lấy danh sách URL bài viết từ RSS feed của Blogger một cách an toàn."""
     print(f"Đang lấy URL từ RSS Feed: {RSS_FEED_URL}")
     try:
-        # Blogger JSONP feed thực chất là JavaScript, cần xử lý để lấy JSON
         response = requests.get(RSS_FEED_URL, headers=HEADERS)
-        response.raise_for_status() # Ném lỗi nếu status code không phải 2xx
+        response.raise_for_status()
         
-        # Trích xuất JSON từ phản hồi JSONP
+        # AN TOÀN HƠN: Trích xuất JSON từ chuỗi JSONP mà không dùng eval()
         jsonp_data = response.text
-        # Tìm chuỗi JSON bên trong callback function
-        match = re.search(r'showrecentposts\((.*)\)', jsonp_data, re.DOTALL)
-        if not match:
-            print("Không tìm thấy dữ liệu JSON trong phản hồi JSONP.")
-            return []
+        # Tìm vị trí bắt đầu và kết thúc của đối tượng JSON
+        start_index = jsonp_data.find('(')
+        end_index = jsonp_data.rfind(')')
         
-        json_data_str = match.group(1)
-        json_data = eval(json_data_str) # Cẩn thận khi dùng eval, nhưng với nguồn tin cậy thì chấp nhận được
+        if start_index == -1 or end_index == -1:
+            print("Không thể phân tích phản hồi JSONP.")
+            return []
+
+        json_str = jsonp_data[start_index + 1 : end_index]
+        json_data = json.loads(json_str)
 
         urls = []
         if 'feed' in json_data and 'entry' in json_data['feed']:
             for entry in json_data['feed']['entry']:
-                post_url = ''
-                for link in entry['link']:
-                    if link['rel'] == 'alternate':
-                        post_url = link['href']
-                        break
+                post_url = next((link['href'] for link in entry.get('link', []) if link.get('rel') == 'alternate'), None)
                 if post_url:
                     urls.append({
                         'url': post_url,
-                        'title': entry['title']['$t'],
-                        'published': entry['published']['$t'] # Lấy ngày xuất bản
+                        'title': entry.get('title', {}).get('$t', ''),
+                        'published': entry.get('published', {}).get('$t', '')
                     })
         print(f"Tìm thấy {len(urls)} URL bài viết từ RSS Feed.")
         return urls
     except requests.exceptions.RequestException as e:
         print(f"Lỗi khi lấy RSS Feed: {e}")
         return []
+    except json.JSONDecodeError as e:
+        print(f"Lỗi khi giải mã JSON: {e}")
+        return []
     except Exception as e:
-        print(f"Lỗi khi xử lý JSONP: {e}")
+        print(f"Lỗi không xác định khi xử lý feed: {e}")
         return []
 
 def scrape_article_content(url):
     """Tải và trích xuất nội dung chính của một bài viết."""
     print(f"Đang scrape nội dung từ: {url}")
     try:
-        response = requests.get(url, headers=HEADERS, timeout=10) # Thêm timeout
+        response = requests.get(url, headers=HEADERS, timeout=15)
         response.raise_for_status()
         soup = BeautifulSoup(response.text, 'html.parser')
 
-        # --- Điều chỉnh selector này dựa trên cấu trúc HTML thực tế của bài viết ---
-        # Bạn cần kiểm tra mã nguồn của một bài viết trên timkhaithi.pmtl.site
-        # để tìm thẻ HTML hoặc class CSS chứa nội dung chính.
-        # Ví dụ: nếu nội dung nằm trong một div có class 'post-body'
-        content_div = soup.find('div', class_='post-body entry-content') # Đây là một class phổ biến của Blogger
+        # Selector này khá phổ biến cho Blogger, bạn có thể cần điều chỉnh
+        content_div = soup.find('div', class_='post-body entry-content')
         
         if not content_div:
-            print(f"Không tìm thấy nội dung bài viết cho URL: {url}. Vui lòng kiểm tra selector.")
+            print(f"Không tìm thấy nội dung cho URL: {url}. Vui lòng kiểm tra selector.")
             return None
 
-        # Loại bỏ các thẻ không mong muốn (ví dụ: script, style, quảng cáo)
-        for unwanted_tag in content_div.find_all(['script', 'style', 'ins', 'iframe', 'a[href*="blogspot.com/"]']):
-            unwanted_tag.decompose() # Xóa thẻ này khỏi cây DOM
+        # Loại bỏ các thẻ không mong muốn
+        for unwanted_tag in content_div.find_all(['script', 'style', 'ins', 'iframe']):
+            unwanted_tag.decompose()
 
-        # Lấy văn bản từ nội dung chính
         content_text = content_div.get_text(separator='\n', strip=True)
-        
-        # Xóa các khoảng trắng thừa và dòng trống
         content_text = re.sub(r'\n\s*\n', '\n\n', content_text).strip()
-
         return content_text
     except requests.exceptions.RequestException as e:
         print(f"Lỗi khi tải trang {url}: {e}")
@@ -118,89 +96,70 @@ def scrape_article_content(url):
         print(f"Lỗi khi phân tích HTML cho {url}: {e}")
         return None
 
-def insert_or_update_article(conn, article_data):
-    """Chèn hoặc cập nhật bài viết vào cơ sở dữ liệu."""
-    cursor = conn.cursor()
+def upsert_article_rpc(supabase_client: Client, article_data: dict):
+    """
+    Gọi một PostgreSQL Function (RPC) trong Supabase để chèn hoặc cập nhật bài viết.
+    Đây là cách hiệu quả và an toàn nhất để xử lý logic phức tạp.
+    """
     try:
-        # Chuyển đổi published_date sang định dạng TIMESTAMP WITH TIME ZONE
+        # Chuyển đổi ngày tháng sang định dạng ISO 8601 chuẩn
         published_date_obj = datetime.fromisoformat(article_data['published'].replace('Z', '+00:00'))
-
-        # Kiểm tra xem bài viết đã tồn tại chưa
-        cursor.execute("SELECT id FROM articles WHERE url = %s", (article_data['url'],))
-        existing_article = cursor.fetchone()
-
-        if existing_article:
-            # Cập nhật bài viết nếu đã tồn tại
-            print(f"Cập nhật bài viết: {article_data['title']}")
-            cursor.execute(
-                """
-                UPDATE articles
-                SET title = %s, content = %s, published_date = %s,
-                    tsv = to_tsvector('vietnamese', unaccent(COALESCE(%s, '') || ' ' || COALESCE(%s, '')))
-                WHERE url = %s
-                """,
-                (article_data['title'], article_data['content'], published_date_obj,
-                 article_data['title'], article_data['content'], article_data['url'])
-            )
-        else:
-            # Chèn bài viết mới
-            print(f"Thêm bài viết mới: {article_data['title']}")
-            cursor.execute(
-                """
-                INSERT INTO articles (title, url, content, published_date, tsv)
-                VALUES (%s, %s, %s, %s,
-                        to_tsvector('vietnamese', unaccent(COALESCE(%s, '') || ' ' || COALESCE(%s, ''))))
-                """,
-                (article_data['title'], article_data['url'], article_data['content'], published_date_obj,
-                 article_data['title'], article_data['content'])
-            )
-        conn.commit()
-    except psycopg2.Error as e:
-        conn.rollback()
-        print(f"Lỗi DB khi xử lý bài viết '{article_data['title']}': {e}")
-    finally:
-        cursor.close()
+        
+        params = {
+            'p_title': article_data['title'],
+            'p_url': article_data['url'],
+            'p_content': article_data['content'],
+            'p_published_date': published_date_obj.isoformat()
+        }
+        
+        # Gọi function tên là 'upsert_article' trong database của bạn
+        result = supabase_client.rpc('upsert_article', params).execute()
+        
+        print(f"Đã xử lý bài viết '{article_data['title']}' thành công.")
+        return result
+    except Exception as e:
+        print(f"Lỗi RPC khi xử lý bài viết '{article_data['title']}': {e}")
+        return None
 
 def main_scraper():
-    conn = None
+    """Hàm chính để chạy toàn bộ quá trình scraper."""
     try:
-        conn = get_db_connection()
-        article_urls_from_feed = get_article_urls_from_feed()
+        supabase = get_supabase_client()
+        articles_from_feed = get_article_urls_from_feed()
 
-        for article_info in article_urls_from_feed:
+        if not articles_from_feed:
+            print("Không có bài viết nào từ feed để xử lý.")
+            return
+
+        # Lấy danh sách URL đã có trong DB để so sánh
+        existing_urls_data = supabase.table('articles').select('url, published_date').execute().data
+        existing_articles = {item['url']: datetime.fromisoformat(item['published_date']) for item in existing_urls_data}
+        
+        for article_info in articles_from_feed:
             url = article_info['url']
             title = article_info['title']
-            published = article_info['published']
+            feed_published_date = datetime.fromisoformat(article_info['published'].replace('Z', '+00:00'))
 
-            # Kiểm tra xem bài viết đã có trong DB với ngày xuất bản mới nhất chưa
-            cursor = conn.cursor()
-            cursor.execute("SELECT published_date FROM articles WHERE url = %s", (url,))
-            db_published_date_raw = cursor.fetchone()
-            cursor.close()
-
-            if db_published_date_raw:
-                db_published_date = db_published_date_raw[0]
-                feed_published_date = datetime.fromisoformat(published.replace('Z', '+00:00'))
-                if feed_published_date <= db_published_date:
-                    print(f"Bài viết '{title}' đã được cập nhật hoặc mới hơn trong DB. Bỏ qua.")
-                    continue # Bỏ qua nếu bài viết đã có và không cũ hơn
-
+            # So sánh ngày xuất bản để quyết định có scrape lại không
+            if url in existing_articles and feed_published_date <= existing_articles[url]:
+                print(f"Bài viết '{title}' đã tồn tại và không có cập nhật mới. Bỏ qua.")
+                continue
+            
             content = scrape_article_content(url)
             if content:
-                insert_or_update_article(conn, {
+                upsert_article_rpc(supabase, {
                     'title': title,
                     'url': url,
                     'content': content,
-                    'published': published
+                    'published': article_info['published']
                 })
-            time.sleep(1) # Đợi 1 giây giữa các yêu cầu để không gây quá tải cho server
+            
+            time.sleep(1) # Giữ khoảng cách giữa các request
 
     except Exception as e:
-        print(f"Lỗi tổng quát trong quá trình scrape: {e}")
+        print(f"Lỗi nghiêm trọng trong quá trình scrape: {e}")
     finally:
-        if conn:
-            conn.close()
-            print("Đã đóng kết nối database.")
+        print("Hoàn tất quá trình scrape.")
 
 if __name__ == "__main__":
     main_scraper()
