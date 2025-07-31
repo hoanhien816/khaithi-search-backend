@@ -1,0 +1,15 @@
+name: Keep Render Backend Alive
+
+on:
+  schedule:
+    # Chạy mỗi 5 phút để đảm bảo không bao giờ quá 15 phút không hoạt động
+    - cron: '*/5 * * * *'
+  workflow_dispatch: # Cho phép chạy thủ công
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping the backend service
+        # Thay thế URL bên dưới bằng URL backend trên Render của bạn
+        run: curl -s "https://khaithi-search-backend.onrender.com/api/search" > /dev/null
