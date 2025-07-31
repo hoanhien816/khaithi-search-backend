@@ -1,0 +1,5 @@
+Flask
+psycopg2-binary
+requests
+beautifulsoup4
+gunicorn # Web server để chạy Flask trên Render
