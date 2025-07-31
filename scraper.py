@@ -75,8 +75,10 @@ def scrape_article_content(url):
         response.raise_for_status()
         soup = BeautifulSoup(response.text, 'html.parser')
 
-        # Selector này khá phổ biến cho Blogger, bạn có thể cần điều chỉnh
-        content_div = soup.find('div', class_='post-body entry-content')
+        # === THAY ĐỔI CHÍNH Ở ĐÂY ===
+        # Selector đã được đơn giản hóa để chỉ tìm 'div' có class 'post-body'
+        # vì class 'entry-content' không phải lúc nào cũng có.
+        content_div = soup.find('div', class_='post-body')
         
         if not content_div:
             print(f"Không tìm thấy nội dung cho URL: {url}. Vui lòng kiểm tra selector.")
