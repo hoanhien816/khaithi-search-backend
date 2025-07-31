@@ -2,15 +2,14 @@ name: Run Scraper Daily
 
 on:
   schedule:
-    # Chạy scraper mỗi ngày vào lúc 00:00 UTC
-    # Bạn có thể thay đổi lịch trình theo ý muốn.
-    # Ví dụ: '0 */6 * * *' để chạy mỗi 6 giờ
+    # Chạy scraper mỗi ngày vào lúc 00:00 UTC (7:00 sáng giờ Việt Nam)
+    # Bạn có thể thay đổi lịch trình. Ví dụ: '0 */6 * * *' để chạy mỗi 6 giờ.
     - cron: '0 0 * * *'
-  workflow_dispatch: # Cho phép chạy thủ công từ GitHub UI
+  workflow_dispatch: # Cho phép chạy thủ công từ tab Actions của GitHub
 
 jobs:
   scrape:
-    runs-on: ubuntu-latest # Môi trường chạy là Ubuntu Linux
+    runs-on: ubuntu-latest # Môi trường chạy là Ubuntu Linux mới nhất
 
     steps:
     - name: Checkout code
@@ -19,14 +18,16 @@ jobs:
     - name: Set up Python
       uses: actions/setup-python@v5
       with:
-        python-version: '3.9' # Sử dụng Python 3.9. Bạn có thể thay đổi nếu cần.
+        python-version: '3.9' # Sử dụng Python 3.9
 
     - name: Install dependencies
-      run: pip install -r requirements.txt # Cài đặt các thư viện từ requirements.txt
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt # Cài đặt các thư viện từ requirements.txt
 
     - name: Run Scraper
-      run: python scraper.py # Chạy script scraper
+      # Cung cấp các biến môi trường mà script Python (sử dụng supabase-py) cần
       env:
-        # Lấy DATABASE_URL từ GitHub Secrets
-        # Bạn cần thêm DATABASE_URL vào GitHub Secrets của repository này
-        DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+        SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }} # Phải là khóa service_role
+      run: python scraper.py # Chạy script scraper
