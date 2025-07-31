@@ -3,3 +3,4 @@ psycopg2-binary
 requests
 beautifulsoup4
 gunicorn # Web server để chạy Flask trên Render
+Flask-Cors # Thêm dòng này để cài đặt Flask-Cors
