@@ -72,6 +72,7 @@ def search_articles():
                 id,
                 title,
                 url,
+                content,
                 ts_headline('vietnamese', content, to_tsquery('vietnamese', unaccent(%s)), 'StartSel=<strong>, StopSel=</strong>, MaxWords=50, MinWords=20, ShortWord=3, HighlightAll=FALSE') as content_snippet,
                 published_date,
                 ts_rank(tsv, to_tsquery('vietnamese', unaccent(%s))) as rank
