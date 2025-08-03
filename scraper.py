@@ -1,7 +1,7 @@
 import os
 import requests
 from bs4 import BeautifulSoup
-from datetime import datetime, timezone
+from datetime import datetime
 import re
 import time
 import json
@@ -101,17 +101,18 @@ def upsert_article_rpc(supabase_client: Client, article_data: dict):
 # *** HÀM CUỐI CÙNG, XỬ LÝ MỌI ĐỊNH DẠNG NGÀY THÁNG ***
 # ======================================================================
 def parse_db_datetime(dt_str: str) -> datetime:
-    """Hàm chuyển đổi chuỗi ngày tháng từ DB một cách linh hoạt, xử lý cả Z, +00:00 và +0000."""
-    # Thay thế Z bằng +00:00 để đồng nhất
-    if dt_str.endswith('Z'):
-        dt_str = dt_str[:-1] + '+00:00'
-    # Nếu có dấu hai chấm trong múi giờ, loại bỏ nó
+    """Hàm chuyển đổi chuỗi ngày tháng từ DB một cách linh hoạt, xử lý mọi trường hợp."""
+    # Chuẩn hóa múi giờ: loại bỏ dấu hai chấm nếu có
     if dt_str[-3] == ':':
         dt_str = dt_str[:-3] + dt_str[-2:]
-    
-    # Định dạng cuối cùng sẽ là '%Y-%m-%dT%H:%M:%S.%f%z'
-    # Ví dụ: '2025-07-24T02:05:00.003+0000'
-    return datetime.strptime(dt_str, '%Y-%m-%dT%H:%M:%S.%f%z')
+
+    # Thử đọc với định dạng có microsecond trước
+    try:
+        return datetime.strptime(dt_str, '%Y-%m-%dT%H:%M:%S.%f%z')
+    except ValueError:
+        # Nếu thất bại, thử lại với định dạng không có microsecond
+        return datetime.strptime(dt_str, '%Y-%m-%dT%H:%M:%S%z')
+
 
 def main_scraper():
     """Hàm chính để chạy toàn bộ quá trình scraper, bao gồm cả việc xóa bài viết cũ."""
@@ -130,7 +131,7 @@ def main_scraper():
         print("\nBắt đầu lấy danh sách bài viết từ cơ sở dữ liệu...")
         response = supabase.table('articles').select('url, published_date').execute()
         
-        # Sử dụng hàm parse_db_datetime mới và mạnh mẽ hơn
+        # Sử dụng hàm parse_db_datetime mạnh mẽ nhất
         db_articles = {item['url']: parse_db_datetime(item['published_date']) for item in response.data}
         db_urls = set(db_articles.keys())
         print(f"Cơ sở dữ liệu hiện có {len(db_urls)} bài viết.")
