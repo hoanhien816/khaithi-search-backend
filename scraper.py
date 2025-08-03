@@ -33,7 +33,6 @@ def get_article_urls_from_feed():
     max_results = 500  # Số lượng tối đa cho mỗi yêu cầu
 
     while True:
-        # Thêm tham số start-index để lấy các trang tiếp theo
         paginated_url = f"{BASE_URL}/feeds/posts/default?orderby=published&alt=json-in-script&start-index={start_index}&max-results={max_results}"
         print(f"Đang lấy trang từ URL: {paginated_url}")
 
@@ -55,7 +54,6 @@ def get_article_urls_from_feed():
             feed = json_data.get('feed', {})
             entries = feed.get('entry', [])
 
-            # Nếu không còn bài viết nào được trả về, nghĩa là đã hết
             if not entries:
                 print("Không còn bài viết nào. Kết thúc quá trình lấy URL.")
                 break
@@ -70,11 +68,8 @@ def get_article_urls_from_feed():
                     })
 
             print(f"Đã lấy được {len(entries)} bài viết. Tổng số hiện tại: {len(all_urls)}")
-
-            # Cập nhật start_index cho lần lặp tiếp theo
-            start_index += len(entries) # Cập nhật dựa trên số lượng thực tế trả về
-
-            time.sleep(1)  # Tạm dừng 1 giây để tránh gây quá tải cho server
+            start_index += len(entries)
+            time.sleep(1)
 
         except requests.exceptions.RequestException as e:
             print(f"Lỗi khi lấy RSS Feed trang: {e}")
@@ -131,7 +126,7 @@ def upsert_article_rpc(supabase_client: Client, article_data: dict):
         
         result = supabase_client.rpc('upsert_article', params).execute()
         
-        print(f"Đã xử lý bài viết '{article_data['title']}' thành công.")
+        # print(f"Đã xử lý bài viết '{article_data['title']}' thành công.")
         return result
     except Exception as e:
         print(f"Lỗi RPC khi xử lý bài viết '{article_data['title']}': {e}")
@@ -148,13 +143,15 @@ def main_scraper():
         if not articles_from_feed:
             print("Không có bài viết nào từ feed. Dừng quá trình.")
             return
-        # Chuyển thành một set để tra cứu nhanh hơn
         source_urls = {article['url'] for article in articles_from_feed}
         print(f"Đã tìm thấy {len(source_urls)} URL hợp lệ từ blog.")
 
         # --- BƯỚC 2: Lấy TOÀN BỘ URL hiện có trong cơ sở dữ liệu ---
         print("\nBắt đầu lấy danh sách bài viết từ cơ sở dữ liệu...")
-        existing_articles_data = supabase.table('articles').select('url, published_date').execute().data
+        existing_articles_response = supabase.table('articles').select('url, published_date').execute()
+        if existing_articles_response.data is None:
+             raise Exception(f"Lỗi khi lấy dữ liệu từ Supabase: {existing_articles_response.error}")
+        existing_articles_data = existing_articles_response.data
         db_articles = {item['url']: datetime.fromisoformat(item['published_date']) for item in existing_articles_data}
         db_urls = set(db_articles.keys())
         print(f"Cơ sở dữ liệu hiện có {len(db_urls)} bài viết.")
@@ -162,21 +159,32 @@ def main_scraper():
         # --- BƯỚC 3: Xác định và XÓA các bài viết không còn tồn tại trên blog ---
         urls_to_delete = db_urls - source_urls
         if urls_to_delete:
-            print(f"\nTìm thấy {len(urls_to_delete)} bài viết cần xóa khỏi cơ sở dữ liệu.")
-            # Chuyển set thành list để dùng trong câu lệnh `in_`
+            print(f"\n[DEBUG] TÌM THẤY {len(urls_to_delete)} URL CẦN XÓA:")
+            # In ra một vài URL để kiểm tra
+            for i, url in enumerate(list(urls_to_delete)[:5]):
+                print(f"  - URL mẫu {i+1}: {url}")
+            
             urls_to_delete_list = list(urls_to_delete)
             try:
-                # Xóa các bài viết theo từng khối 100 để tránh URL quá dài
+                print("\n[ACTION] Bắt đầu gửi yêu cầu xóa tới Supabase...")
                 chunk_size = 100
                 for i in range(0, len(urls_to_delete_list), chunk_size):
                     chunk = urls_to_delete_list[i:i + chunk_size]
-                    print(f"Đang xóa khối {i//chunk_size + 1}...")
-                    supabase.table('articles').delete().in_('url', chunk).execute()
-                print("Đã xóa thành công các bài viết cũ.")
+                    print(f"  - Đang xử lý khối {i//chunk_size + 1}/{ -(-len(urls_to_delete_list) // chunk_size) }...")
+                    delete_result = supabase.table('articles').delete().in_('url', chunk).execute()
+                    
+                    # Log chi tiết kết quả trả về từ Supabase
+                    print(f"  - [RESULT] Supabase phản hồi cho khối {i//chunk_size + 1}: count={len(delete_result.data)}, error={delete_result.error}")
+                    if delete_result.error:
+                        print(f"  - [!!!] CÓ LỖI XẢY RA TRONG QUÁ TRÌNH XÓA. DỪNG LẠI.")
+                        raise Exception(f"Supabase delete error: {delete_result.error}")
+
+                print("\n[SUCCESS] Đã gửi tất cả yêu cầu xóa thành công.")
             except Exception as e:
-                print(f"Lỗi khi xóa bài viết cũ: {e}")
+                # In ra lỗi cụ thể hơn
+                print(f"\n[!!!] LỖI KHI THỰC THI VIỆC XÓA: {e}")
         else:
-            print("\nKhông có bài viết nào cần xóa. Cơ sở dữ liệu đã được đồng bộ.")
+            print("\n[INFO] Không có bài viết nào cần xóa. Cơ sở dữ liệu đã được đồng bộ.")
 
         # --- BƯỚC 4: Cập nhật và Thêm các bài viết mới ---
         print("\nBắt đầu quá trình thêm mới và cập nhật bài viết...")
@@ -186,7 +194,6 @@ def main_scraper():
             title = article_info['title']
             feed_published_date = datetime.fromisoformat(article_info['published'].replace('Z', '+00:00'))
 
-            # Chỉ scrape và upsert nếu bài viết là mới, hoặc đã có nhưng ngày cập nhật trên feed mới hơn
             if url not in db_articles or feed_published_date > db_articles[url]:
                 print(f"({index + 1}/{total_articles}) Đang xử lý: '{title}'")
                 content = scrape_article_content(url)
@@ -197,12 +204,14 @@ def main_scraper():
                         'content': content,
                         'published': article_info['published']
                     })
-                time.sleep(1) # Giữ khoảng nghỉ để tránh quá tải
+                time.sleep(1)
             else:
                 pass
 
     except Exception as e:
         print(f"Lỗi nghiêm trọng trong quá trình scrape: {e}")
     finally:
-        # === DÒNG GÂY LỖI ĐÃ ĐƯỢC SỬA LẠI ĐÚNG INDENTATION ===
         print("\nHoàn tất quá trình scrape.")
+
+if __name__ == "__main__":
+    main_scraper()
