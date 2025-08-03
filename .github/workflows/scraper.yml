@@ -3,52 +3,54 @@ name: Run Scraper Daily
 on:
   schedule:
     # Chạy scraper mỗi ngày vào lúc 00:00 UTC (7:00 sáng giờ Việt Nam)
-    # Bạn có thể thay đổi lịch trình. Ví dụ: '0 */6 * * *' để chạy mỗi 6 giờ.
     - cron: '0 0 * * *'
   workflow_dispatch: # Cho phép chạy thủ công từ tab Actions của GitHub
 
 jobs:
   scrape:
-    runs-on: ubuntu-latest # Môi trường chạy là Ubuntu Linux mới nhất
+    runs-on: ubuntu-latest
 
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4 # Lấy mã nguồn từ repository
+    - name: 1. Checkout code
+      uses: actions/checkout@v4
 
-    - name: List files in repository
-      run: ls -la # Bước gỡ lỗi: Kiểm tra xem scraper.py và requirements.txt có tồn tại không
-
-    - name: Set up Python
+    - name: 2. Set up Python
       uses: actions/setup-python@v5
       with:
-        python-version: '3.9' # Sử dụng Python 3.9
+        python-version: '3.9'
 
-    - name: Install dependencies
+    - name: 3. Install dependencies
       run: |
+        set -e # Dừng lại ngay nếu có lỗi
         python -m pip install --upgrade pip
-        # Cài đặt tường minh thư viện supabase để khắc phục lỗi ModuleNotFoundError
-        pip install supabase
-        # Cài đặt các thư viện còn lại từ requirements.txt
-        pip install -r requirements.txt 
+        pip install -r requirements.txt
+        pip install supabase # Cài thêm các thư viện chưa có trong file
+        echo "--- DANH SÁCH THƯ VIỆN ĐÃ CÀI ---"
+        pip freeze # In ra tất cả các thư viện đã được cài đặt
 
-    - name: Check if secrets are loaded
+    - name: 4. Verify file existence
       run: |
+        echo "--- KIỂM TRA SỰ TỒN TẠI CỦA FILE ---"
+        ls -la
+        
+    - name: 5. Check secrets are loaded
+      run: |
+        echo "--- KIỂM TRA BIẾN MÔI TRƯỜNG ---"
         if [ -z "${{ secrets.SUPABASE_URL }}" ]; then
-          echo "Lỗi: Secret SUPABASE_URL chưa được đặt."
+          echo "[LỖI] Secret SUPABASE_URL chưa được đặt."
           exit 1
-        else
-          echo "Secret SUPABASE_URL đã được tải."
         fi
         if [ -z "${{ secrets.SUPABASE_KEY }}" ]; then
-          echo "Lỗi: Secret SUPABASE_KEY chưa được đặt."
+          echo "[LỖI] Secret SUPABASE_KEY chưa được đặt."
           exit 1
-        else
-          echo "Secret SUPABASE_KEY đã được tải."
         fi
+        echo "[OK] Các secret đã được tải thành công."
 
-    - name: Run Scraper
-      # Cung cấp các biến môi trường mà script Python (sử dụng supabase-py) cần
+    - name: 6. Run Scraper with Full Debug
       env:
         SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-        SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }} # Phải là khóa service_role
-      run: python scraper.py # Chạy script scraper
+        SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+        PYTHONUNBUFFERED: "1" # Bắt buộc Python in ra log ngay lập tức
+      run: |
+        echo "--- BẮT ĐẦU CHẠY SCRIPT PYTHON ---"
+        python -u scraper.py
