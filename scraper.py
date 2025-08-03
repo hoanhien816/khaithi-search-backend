@@ -20,16 +20,60 @@ def get_supabase_client():
         raise ValueError("Supabase URL hoặc Key không được cấu hình.")
     return create_client(url, key)
 
-def get_article_urls_from_feed():
-    """Hàm giả định lấy URL từ blog gốc. Cần thay thế bằng logic thực tế của bạn."""
-    print("[DEBUG] Bắt đầu lấy URL từ blog gốc...")
+def scrape_article_content(url):
+    """Giả định hàm scrape nội dung, cần logic thực tế của bạn."""
+    print(f"[DEBUG] Scraping nội dung từ URL: {url}")
     # Thêm logic của bạn vào đây
-    # Ví dụ: return [{'url': 'https://example.com/bai-viet-1', 'published_date': '2025-01-01T00:00:00Z'}]
-    return [] 
+    # Ví dụ:
+    # response = requests.get(url)
+    # soup = BeautifulSoup(response.text, 'html.parser')
+    # content = soup.find('div', class_='post-body').get_text()
+    # return "Nội dung bài viết giả lập."
+    return "Nội dung bài viết giả lập."
 
-# Giữ nguyên các hàm `scrape_article_content` và `upsert_article_rpc` của bạn
+def upsert_article_rpc(supabase, article_data):
+    """Giả định hàm upsert, cần logic thực tế của bạn."""
+    print(f"[DEBUG] Upserting bài viết: {article_data['title']}")
+    # Thêm logic của bạn vào đây
+    # Ví dụ:
+    # supabase.rpc('upsert_article', article_data).execute()
+    pass
 
-# Hàm parse_db_datetime và main_scraper đã được bạn cung cấp.
+def get_article_urls_from_feed():
+    """
+    Lấy danh sách URL bài viết và ngày xuất bản từ nguồn cấp dữ liệu (RSS/Atom feed)
+    của blog gốc.
+    """
+    BLOG_FEED_URL = "https://hoanhien.vn/feeds/posts/default?alt=json"  # URL feed JSON của blog Blogger
+    print(f"[DEBUG] Bắt đầu lấy URL từ blog gốc tại: {BLOG_FEED_URL}")
+    
+    try:
+        response = requests.get(BLOG_FEED_URL)
+        response.raise_for_status()  # Ném lỗi nếu yêu cầu không thành công
+
+        data = response.json()
+        articles = []
+        
+        # Lặp qua các bài viết trong feed JSON
+        for entry in data['feed']['entry']:
+            url = next(link['href'] for link in entry['link'] if link['rel'] == 'alternate')
+            published_date_str = entry['published']['$t']
+            
+            articles.append({
+                'url': url,
+                'published_date': published_date_str
+            })
+
+        print(f"[DEBUG] Đã lấy được {len(articles)} URL từ feed.")
+        return articles
+
+    except requests.exceptions.RequestException as e:
+        print(f"[!!!] Lỗi khi lấy dữ liệu từ blog gốc: {e}")
+        return []
+    except KeyError as e:
+        print(f"[!!!] Lỗi phân tích cấu trúc feed JSON: {e}")
+        return []
+
 def parse_db_datetime(dt_str: str) -> datetime:
     """Hàm chuyển đổi chuỗi ngày tháng từ DB một cách linh hoạt, xử lý mọi trường hợp."""
     if dt_str.endswith('+00:00'): dt_str = dt_str[:-3] + dt_str[-2:]
@@ -38,10 +82,11 @@ def parse_db_datetime(dt_str: str) -> datetime:
 
 def main_scraper():
     """Hàm chính để chạy toàn bộ quá trình scraper, bao gồm cả việc xóa và xác minh."""
-    print("[DEBUG] Bắt đầu main_scraper...") # Thêm dòng này để kiểm tra
+    print("[DEBUG] Bắt đầu main_scraper...")
     try:
         supabase = get_supabase_client()
-        print("[DEBUG] Kết nối Supabase thành công.") # Thêm dòng này
+        print("[DEBUG] Kết nối Supabase thành công.")
+        
         # BƯỚC 1: Lấy URL từ blog gốc
         print("--- GIAI ĐOẠN 1: THU THẬP DỮ LIỆU ---")
         articles_from_feed = get_article_urls_from_feed()
@@ -83,7 +128,12 @@ def main_scraper():
 
         # BƯỚC 4: Cập nhật và Thêm bài viết mới
         print("\n--- GIAI ĐOẠN 3: CẬP NHẬT DỮ LIỆU MỚI ---")
-        # (Giữ nguyên logic cập nhật)
+        # Giả định logic cập nhật
+        # articles_to_upsert = # Logic để lấy các bài viết cần cập nhật
+        # for article in articles_to_upsert:
+        #     article_data = scrape_article_content(article['url'])
+        #     upsert_article_rpc(supabase, article_data)
+        # print("[SUCCESS] Đã cập nhật xong dữ liệu mới.")
 
     except Exception as e:
         print(f"\n[!!!] LỖI NGHIÊM TRỌNG TRONG QUÁ TRÌNH SCRAPE: {e}")
