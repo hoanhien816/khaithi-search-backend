@@ -27,18 +27,20 @@ jobs:
         echo "--- DANH SÁCH THƯ VIỆN ĐÃ CÀI ---"
         pip freeze
 
-    - name: 4. Verify file and environment
+    - name: 4. Verify Syntax and File
       run: |
-        echo "--- Python Path ---"
-        which python
-        echo "--- File List ---"
+        echo "--- KIỂM TRA CÚ PHÁP SCRIPT ---"
+        # Lệnh này sẽ kiểm tra file scraper.py có lỗi cú pháp không mà không cần chạy nó.
+        # Đây là bước gỡ lỗi quan trọng.
+        python -m py_compile scraper.py
+        echo "[OK] Cú pháp file scraper.py hợp lệ."
+        echo "--- DANH SÁCH FILE HIỆN CÓ ---"
         ls -la
         
-    - name: 5. Run Scraper via Python Module
+    - name: 5. Run Scraper
       env:
         SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
         SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
-        PYTHONUNBUFFERED: "1"
-      # *** THAY ĐỔI QUAN TRỌNG: Chạy scraper như một module ***
-      # Cách này ổn định hơn và tránh được các lỗi môi trường tiềm ẩn.
-      run: python -m scraper
+        PYTHONUNBUFFERED: "1" # Bắt buộc Python in ra log ngay lập tức
+      # Quay lại cách chạy trực tiếp, là cách đáng tin cậy nhất.
+      run: python scraper.py
