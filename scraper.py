@@ -67,7 +67,6 @@ def get_article_urls_from_feed():
 
 def scrape_article_content(url):
     """Tải và trích xuất nội dung chính của một bài viết."""
-    # print(f"Đang scrape nội dung từ: {url}") # Tạm ẩn để log gọn hơn
     try:
         response = requests.get(url, headers=HEADERS, timeout=15)
         response.raise_for_status()
@@ -102,17 +101,31 @@ def upsert_article_rpc(supabase_client: Client, article_data: dict):
 # ======================================================================
 def parse_db_datetime(dt_str: str) -> datetime:
     """Hàm chuyển đổi chuỗi ngày tháng từ DB một cách linh hoạt, xử lý mọi trường hợp."""
-    # Chuẩn hóa múi giờ: loại bỏ dấu hai chấm nếu có
     if dt_str[-3] == ':':
         dt_str = dt_str[:-3] + dt_str[-2:]
-
-    # Thử đọc với định dạng có microsecond trước
     try:
         return datetime.strptime(dt_str, '%Y-%m-%dT%H:%M:%S.%f%z')
     except ValueError:
-        # Nếu thất bại, thử lại với định dạng không có microsecond
         return datetime.strptime(dt_str, '%Y-%m-%dT%H:%M:%S%z')
 
+def get_all_articles_from_db(supabase_client: Client) -> dict[str, datetime]:
+    """Lấy TOÀN BỘ bài viết từ Supabase, xử lý phân trang."""
+    all_articles = {}
+    page_index = 0
+    page_size = 1000
+    while True:
+        print(f"Đang lấy bài viết từ DB - Trang {page_index + 1}...")
+        start_offset = page_index * page_size
+        response = supabase_client.table('articles').select('url, published_date').range(start_offset, start_offset + page_size - 1).execute()
+        if not response.data:
+            print("Đã lấy hết bài viết từ DB.")
+            break
+        for item in response.data:
+            all_articles[item['url']] = parse_db_datetime(item['published_date'])
+        if len(response.data) < page_size:
+            break
+        page_index += 1
+    return all_articles
 
 def main_scraper():
     """Hàm chính để chạy toàn bộ quá trình scraper, bao gồm cả việc xóa bài viết cũ."""
@@ -127,14 +140,11 @@ def main_scraper():
         source_urls = {article['url'] for article in articles_from_feed}
         print(f"Đã tìm thấy {len(source_urls)} URL hợp lệ từ blog.")
 
-        # BƯỚC 2: Lấy URL từ cơ sở dữ liệu
-        print("\nBắt đầu lấy danh sách bài viết từ cơ sở dữ liệu...")
-        response = supabase.table('articles').select('url, published_date').execute()
-        
-        # Sử dụng hàm parse_db_datetime mạnh mẽ nhất
-        db_articles = {item['url']: parse_db_datetime(item['published_date']) for item in response.data}
+        # BƯỚC 2: Lấy TOÀN BỘ URL từ cơ sở dữ liệu (ĐÃ SỬA)
+        print("\nBắt đầu lấy toàn bộ danh sách bài viết từ cơ sở dữ liệu...")
+        db_articles = get_all_articles_from_db(supabase)
         db_urls = set(db_articles.keys())
-        print(f"Cơ sở dữ liệu hiện có {len(db_urls)} bài viết.")
+        print(f"Cơ sở dữ liệu hiện có tổng cộng {len(db_urls)} bài viết.")
 
         # BƯỚC 3: Xác định và XÓA bài viết cũ
         urls_to_delete = db_urls - source_urls
