@@ -142,35 +142,31 @@ def main_scraper():
     try:
         supabase = get_supabase_client()
 
-        # --- BƯỚC 1: Lấy TOÀN BỘ URL bài viết từ blog gốc (Giữ nguyên như cũ) ---
+        # --- BƯỚC 1: Lấy TOÀN BỘ URL bài viết từ blog gốc ---
+        print("Bắt đầu lấy danh sách bài viết từ blog gốc...")
         articles_from_feed = get_article_urls_from_feed()
-
         if not articles_from_feed:
-            print("Không có bài viết nào từ feed để xử lý.")
+            print("Không có bài viết nào từ feed. Dừng quá trình.")
             return
-
-        # ======================================================================
-        # *** BẮT ĐẦU ĐOẠN CODE CHÈN THÊM ĐỂ XÓA BÀI VIẾT CŨ ***
-        # ======================================================================
-
-        # Chuyển danh sách URL từ feed thành một SET để tra cứu nhanh
+        # Chuyển thành một set để tra cứu nhanh hơn
         source_urls = {article['url'] for article in articles_from_feed}
-        print(f"Đã tìm thấy {len(source_urls)} URL hợp lệ từ blog gốc.")
+        print(f"Đã tìm thấy {len(source_urls)} URL hợp lệ từ blog.")
 
-        # Lấy toàn bộ URL hiện có trong cơ sở dữ liệu của bạn
+        # --- BƯỚC 2: Lấy TOÀN BỘ URL hiện có trong cơ sở dữ liệu ---
         print("\nBắt đầu lấy danh sách bài viết từ cơ sở dữ liệu...")
-        existing_urls_data = supabase.table('articles').select('url').execute().data
-        db_urls = {item['url'] for item in existing_urls_data}
+        existing_articles_data = supabase.table('articles').select('url, published_date').execute().data
+        db_articles = {item['url']: datetime.fromisoformat(item['published_date']) for item in existing_articles_data}
+        db_urls = set(db_articles.keys())
         print(f"Cơ sở dữ liệu hiện có {len(db_urls)} bài viết.")
 
-        # So sánh để tìm ra những URL cần xóa (có trong DB nhưng không có trên blog)
+        # --- BƯỚC 3: Xác định và XÓA các bài viết không còn tồn tại trên blog ---
         urls_to_delete = db_urls - source_urls
-
         if urls_to_delete:
             print(f"\nTìm thấy {len(urls_to_delete)} bài viết cần xóa khỏi cơ sở dữ liệu.")
+            # Chuyển set thành list để dùng trong câu lệnh `in_`
             urls_to_delete_list = list(urls_to_delete)
             try:
-                # Xóa các bài viết theo từng khối để tránh request quá lớn
+                # Xóa các bài viết theo từng khối 100 để tránh URL quá dài
                 chunk_size = 100
                 for i in range(0, len(urls_to_delete_list), chunk_size):
                     chunk = urls_to_delete_list[i:i + chunk_size]
@@ -182,22 +178,17 @@ def main_scraper():
         else:
             print("\nKhông có bài viết nào cần xóa. Cơ sở dữ liệu đã được đồng bộ.")
 
-        # ======================================================================
-        # *** KẾT THÚC ĐOẠN CODE CHÈN THÊM ***
-        # ======================================================================
-
-        # --- BƯỚC 2: Cập nhật và Thêm bài viết (Logic cũ của bạn giữ nguyên) ---
+        # --- BƯỚC 4: Cập nhật và Thêm các bài viết mới ---
         print("\nBắt đầu quá trình thêm mới và cập nhật bài viết...")
-        existing_articles = {item['url']: datetime.fromisoformat(item['published_date']) for item in supabase.table('articles').select('url, published_date').execute().data}
-        
-        for article_info in articles_from_feed:
+        total_articles = len(articles_from_feed)
+        for index, article_info in enumerate(articles_from_feed):
             url = article_info['url']
             title = article_info['title']
             feed_published_date = datetime.fromisoformat(article_info['published'].replace('Z', '+00:00'))
 
-            # Tối ưu hóa: Chỉ scrape và upsert nếu bài viết là mới hoặc có cập nhật
-            if url not in existing_articles or feed_published_date > existing_articles[url]:
-                print(f"Đang xử lý: '{title}'")
+            # Chỉ scrape và upsert nếu bài viết là mới, hoặc đã có nhưng ngày cập nhật trên feed mới hơn
+            if url not in db_articles or feed_published_date > db_articles[url]:
+                print(f"({index + 1}/{total_articles}) Đang xử lý: '{title}'")
                 content = scrape_article_content(url)
                 if content:
                     upsert_article_rpc(supabase, {
@@ -206,9 +197,12 @@ def main_scraper():
                         'content': content,
                         'published': article_info['published']
                     })
-                time.sleep(1) # Giữ khoảng nghỉ
+                time.sleep(1) # Giữ khoảng nghỉ để tránh quá tải
+            else:
+                pass
 
     except Exception as e:
         print(f"Lỗi nghiêm trọng trong quá trình scrape: {e}")
     finally:
-print("\nHoàn tất quá trình scrape.")
+        # === DÒNG GÂY LỖI ĐÃ ĐƯỢC SỬA LẠI ĐÚNG INDENTATION ===
+        print("\nHoàn tất quá trình scrape.")
