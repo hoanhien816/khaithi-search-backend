@@ -67,7 +67,7 @@ def get_article_urls_from_feed():
 
 def scrape_article_content(url):
     """Tải và trích xuất nội dung chính của một bài viết."""
-    print(f"Đang scrape nội dung từ: {url}")
+    # print(f"Đang scrape nội dung từ: {url}") # Tạm ẩn để log gọn hơn
     try:
         response = requests.get(url, headers=HEADERS, timeout=15)
         response.raise_for_status()
@@ -98,7 +98,8 @@ def upsert_article_rpc(supabase_client: Client, article_data: dict):
         print(f"Lỗi RPC khi xử lý bài viết '{article_data['title']}': {e}")
 
 def parse_db_datetime(dt_str: str) -> datetime:
-    """Hàm chuyển đổi chuỗi ngày tháng từ DB một cách linh hoạt."""
+    """Hàm chuyển đổi chuỗi ngày tháng từ DB một cách linh hoạt, chấp nhận cả +00:00 và +0000."""
+    # Sửa lỗi: Nếu chuỗi kết thúc bằng "+00:00", thay thế nó bằng "+0000"
     if dt_str.endswith('+00:00'):
         dt_str = dt_str[:-3] + dt_str[-2:]
     return datetime.fromisoformat(dt_str)
@@ -120,7 +121,6 @@ def main_scraper():
         print("\nBắt đầu lấy danh sách bài viết từ cơ sở dữ liệu...")
         response = supabase.table('articles').select('url, published_date').execute()
         
-        # *** SỬA LỖI Ở ĐÂY: Truy cập dữ liệu đúng cách ***
         db_articles = {item['url']: parse_db_datetime(item['published_date']) for item in response.data}
         db_urls = set(db_articles.keys())
         print(f"Cơ sở dữ liệu hiện có {len(db_urls)} bài viết.")
