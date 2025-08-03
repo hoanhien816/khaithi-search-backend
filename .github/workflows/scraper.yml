@@ -21,36 +21,24 @@ jobs:
 
     - name: 3. Install dependencies
       run: |
-        set -e # Dừng lại ngay nếu có lỗi
+        set -e
         python -m pip install --upgrade pip
         pip install -r requirements.txt
-        pip install supabase # Cài thêm các thư viện chưa có trong file
         echo "--- DANH SÁCH THƯ VIỆN ĐÃ CÀI ---"
-        pip freeze # In ra tất cả các thư viện đã được cài đặt
+        pip freeze
 
-    - name: 4. Verify file existence
+    - name: 4. Verify file and environment
       run: |
-        echo "--- KIỂM TRA SỰ TỒN TẠI CỦA FILE ---"
+        echo "--- Python Path ---"
+        which python
+        echo "--- File List ---"
         ls -la
         
-    - name: 5. Check secrets are loaded
-      run: |
-        echo "--- KIỂM TRA BIẾN MÔI TRƯỜNG ---"
-        if [ -z "${{ secrets.SUPABASE_URL }}" ]; then
-          echo "[LỖI] Secret SUPABASE_URL chưa được đặt."
-          exit 1
-        fi
-        if [ -z "${{ secrets.SUPABASE_KEY }}" ]; then
-          echo "[LỖI] Secret SUPABASE_KEY chưa được đặt."
-          exit 1
-        fi
-        echo "[OK] Các secret đã được tải thành công."
-
-    - name: 6. Run Scraper with Full Debug
+    - name: 5. Run Scraper via Python Module
       env:
         SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
         SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
-        PYTHONUNBUFFERED: "1" # Bắt buộc Python in ra log ngay lập tức
-      run: |
-        echo "--- BẮT ĐẦU CHẠY SCRIPT PYTHON ---"
-        python -u scraper.py
+        PYTHONUNBUFFERED: "1"
+      # *** THAY ĐỔI QUAN TRỌNG: Chạy scraper như một module ***
+      # Cách này ổn định hơn và tránh được các lỗi môi trường tiềm ẩn.
+      run: python -m scraper
