@@ -7,8 +7,29 @@ import time
 import json
 from supabase import create_client, Client
 
-# (Các hàm get_supabase_client, get_article_urls_from_feed, scrape_article_content, upsert_article_rpc, parse_db_datetime giữ nguyên như phiên bản trước)
+# *** THÊM CÁC HÀM CÒN THIẾU TỪ BẢN GỐC ĐỂ CHẠY ĐƯỢC ***
+# Các hàm này cần có trong file của bạn. Tôi sẽ thêm vào đây để đảm bảo mã chạy hoàn chỉnh
+def get_supabase_client():
+    """Kết nối tới Supabase và trả về client."""
+    url = os.environ.get("SUPABASE_URL")
+    key = os.environ.get("SUPABASE_KEY")
+    # Các dòng print để gỡ lỗi
+    print(f"[DEBUG] SUPABASE_URL đã được đọc: {bool(url)}")
+    print(f"[DEBUG] SUPABASE_KEY đã được đọc: {bool(key)}")
+    if not url or not key:
+        raise ValueError("Supabase URL hoặc Key không được cấu hình.")
+    return create_client(url, key)
 
+def get_article_urls_from_feed():
+    """Hàm giả định lấy URL từ blog gốc. Cần thay thế bằng logic thực tế của bạn."""
+    print("[DEBUG] Bắt đầu lấy URL từ blog gốc...")
+    # Thêm logic của bạn vào đây
+    # Ví dụ: return [{'url': 'https://example.com/bai-viet-1', 'published_date': '2025-01-01T00:00:00Z'}]
+    return [] 
+
+# Giữ nguyên các hàm `scrape_article_content` và `upsert_article_rpc` của bạn
+
+# Hàm parse_db_datetime và main_scraper đã được bạn cung cấp.
 def parse_db_datetime(dt_str: str) -> datetime:
     """Hàm chuyển đổi chuỗi ngày tháng từ DB một cách linh hoạt, xử lý mọi trường hợp."""
     if dt_str.endswith('+00:00'): dt_str = dt_str[:-3] + dt_str[-2:]
@@ -17,13 +38,16 @@ def parse_db_datetime(dt_str: str) -> datetime:
 
 def main_scraper():
     """Hàm chính để chạy toàn bộ quá trình scraper, bao gồm cả việc xóa và xác minh."""
+    print("[DEBUG] Bắt đầu main_scraper...") # Thêm dòng này để kiểm tra
     try:
         supabase = get_supabase_client()
-
+        print("[DEBUG] Kết nối Supabase thành công.") # Thêm dòng này
         # BƯỚC 1: Lấy URL từ blog gốc
         print("--- GIAI ĐOẠN 1: THU THẬP DỮ LIỆU ---")
         articles_from_feed = get_article_urls_from_feed()
-        if not articles_from_feed: return
+        if not articles_from_feed: 
+            print("[INFO] Không tìm thấy URL nào từ blog gốc, dừng scraper.")
+            return
         source_urls = {article['url'] for article in articles_from_feed}
         print(f"[INFO] Tổng số URL duy nhất từ blog gốc: {len(source_urls)}")
 
@@ -66,4 +90,6 @@ def main_scraper():
     finally:
         print("\n--- HOÀN TẤT TOÀN BỘ QUÁ TRÌNH SCRAPE ---")
 
-# (Các hàm khác và `if __name__ == "__main__":` giữ nguyên)
+# (Giữ nguyên dòng này)
+if __name__ == '__main__':
+    main_scraper()
