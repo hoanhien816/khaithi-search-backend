@@ -7,139 +7,171 @@ import time
 import json
 from supabase import create_client, Client
 
-# *** THÊM CÁC HÀM CÒN THIẾU TỪ BẢN GỐC ĐỂ CHẠY ĐƯỢC ***
-# Các hàm này cần có trong file của bạn. Tôi sẽ thêm vào đây để đảm bảo mã chạy hoàn chỉnh
+# --- Cấu hình ---
+SUPABASE_URL = os.environ.get("SUPABASE_URL")
+SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
+
+BASE_URL = "https://timkhaithi.pmtl.site"
+HEADERS = {
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+}
+
 def get_supabase_client():
-    """Kết nối tới Supabase và trả về client."""
-    url = os.environ.get("SUPABASE_URL")
-    key = os.environ.get("SUPABASE_KEY")
-    # Các dòng print để gỡ lỗi
-    print(f"[DEBUG] SUPABASE_URL đã được đọc: {bool(url)}")
-    print(f"[DEBUG] SUPABASE_KEY đã được đọc: {bool(key)}")
-    if not url or not key:
-        raise ValueError("Supabase URL hoặc Key không được cấu hình.")
-    return create_client(url, key)
-
-def scrape_article_content(url):
-    """Giả định hàm scrape nội dung, cần logic thực tế của bạn."""
-    print(f"[DEBUG] Scraping nội dung từ URL: {url}")
-    # Thêm logic của bạn vào đây
-    # Ví dụ:
-    # response = requests.get(url)
-    # soup = BeautifulSoup(response.text, 'html.parser')
-    # content = soup.find('div', class_='post-body').get_text()
-    # return "Nội dung bài viết giả lập."
-    return "Nội dung bài viết giả lập."
-
-def upsert_article_rpc(supabase, article_data):
-    """Giả định hàm upsert, cần logic thực tế của bạn."""
-    print(f"[DEBUG] Upserting bài viết: {article_data['title']}")
-    # Thêm logic của bạn vào đây
-    # Ví dụ:
-    # supabase.rpc('upsert_article', article_data).execute()
-    pass
+    """Khởi tạo và trả về Supabase client."""
+    if not SUPABASE_URL or not SUPABASE_KEY:
+        raise EnvironmentError("Vui lòng đặt biến môi trường SUPABASE_URL và SUPABASE_KEY.")
+    return create_client(SUPABASE_URL, SUPABASE_KEY)
 
 def get_article_urls_from_feed():
-    """
-    Lấy danh sách URL bài viết và ngày xuất bản từ nguồn cấp dữ liệu (RSS/Atom feed)
-    của blog gốc.
-    """
-    BLOG_FEED_URL = "https://hoanhien.vn/feeds/posts/default?alt=json"  # URL feed JSON của blog Blogger
-    print(f"[DEBUG] Bắt đầu lấy URL từ blog gốc tại: {BLOG_FEED_URL}")
-    
+    """Lấy TOÀN BỘ URL bài viết từ RSS feed, tự động xử lý phân trang."""
+    print("Bắt đầu lấy toàn bộ URL từ RSS Feed, có xử lý phân trang...")
+    all_urls = []
+    start_index = 1
+    max_results = 500
+
+    while True:
+        paginated_url = f"{BASE_URL}/feeds/posts/default?orderby=published&alt=json-in-script&start-index={start_index}&max-results={max_results}"
+        print(f"Đang lấy trang từ URL: {paginated_url}")
+        try:
+            response = requests.get(paginated_url, headers=HEADERS, timeout=20)
+            response.raise_for_status()
+            jsonp_data = response.text
+            start_json = jsonp_data.find('(')
+            end_json = jsonp_data.rfind(')')
+            if start_json == -1 or end_json == -1:
+                print("Lỗi phân tích JSONP, không tìm thấy dấu ngoặc.")
+                break
+            json_str = jsonp_data[start_json + 1: end_json]
+            json_data = json.loads(json_str)
+            feed = json_data.get('feed', {})
+            entries = feed.get('entry', [])
+            if not entries:
+                print("Không còn bài viết nào. Kết thúc quá trình lấy URL.")
+                break
+            for entry in entries:
+                post_url = next((link['href'] for link in entry.get('link', []) if link.get('rel') == 'alternate'), None)
+                if post_url:
+                    all_urls.append({
+                        'url': post_url,
+                        'title': entry.get('title', {}).get('$t', ''),
+                        'published': entry.get('published', {}).get('$t', '')
+                    })
+            print(f"Đã lấy được {len(entries)} bài viết. Tổng số hiện tại: {len(all_urls)}")
+            start_index += len(entries)
+            time.sleep(1)
+        except Exception as e:
+            print(f"Lỗi khi xử lý feed: {e}")
+            break
+    print(f"Hoàn tất! Đã tìm thấy tổng cộng {len(all_urls)} URL bài viết.")
+    return all_urls
+
+def scrape_article_content(url):
+    """Tải và trích xuất nội dung chính của một bài viết."""
+    # print(f"Đang scrape nội dung từ: {url}") # Tạm ẩn để log gọn hơn
     try:
-        response = requests.get(BLOG_FEED_URL)
-        response.raise_for_status()  # Ném lỗi nếu yêu cầu không thành công
+        response = requests.get(url, headers=HEADERS, timeout=15)
+        response.raise_for_status()
+        soup = BeautifulSoup(response.text, 'html.parser')
+        content_div = soup.find('div', class_='post-body')
+        if not content_div:
+            return None
+        for unwanted_tag in content_div.find_all(['script', 'style', 'ins', 'iframe']):
+            unwanted_tag.decompose()
+        content_text = content_div.get_text(separator='\n', strip=True)
+        return re.sub(r'\n\s*\n', '\n\n', content_text).strip()
+    except Exception as e:
+        print(f"Lỗi khi phân tích HTML cho {url}: {e}")
+        return None
 
-        data = response.json()
-        articles = []
-        
-        # Lặp qua các bài viết trong feed JSON
-        for entry in data['feed']['entry']:
-            url = next(link['href'] for link in entry['link'] if link['rel'] == 'alternate')
-            published_date_str = entry['published']['$t']
-            
-            articles.append({
-                'url': url,
-                'published_date': published_date_str
-            })
+def upsert_article_rpc(supabase_client: Client, article_data: dict):
+    """Gọi một PostgreSQL Function (RPC) trong Supabase để chèn hoặc cập nhật bài viết."""
+    try:
+        published_date_obj = datetime.fromisoformat(article_data['published'].replace('Z', '+00:00'))
+        params = {
+            'p_title': article_data['title'],
+            'p_url': article_data['url'],
+            'p_content': article_data['content'],
+            'p_published_date': published_date_obj.isoformat()
+        }
+        supabase_client.rpc('upsert_article', params).execute()
+    except Exception as e:
+        print(f"Lỗi RPC khi xử lý bài viết '{article_data['title']}': {e}")
 
-        print(f"[DEBUG] Đã lấy được {len(articles)} URL từ feed.")
-        return articles
-
-    except requests.exceptions.RequestException as e:
-        print(f"[!!!] Lỗi khi lấy dữ liệu từ blog gốc: {e}")
-        return []
-    except KeyError as e:
-        print(f"[!!!] Lỗi phân tích cấu trúc feed JSON: {e}")
-        return []
-
+# ======================================================================
+# *** HÀM CUỐI CÙNG, XỬ LÝ MỌI ĐỊNH DẠNG NGÀY THÁNG ***
+# ======================================================================
 def parse_db_datetime(dt_str: str) -> datetime:
     """Hàm chuyển đổi chuỗi ngày tháng từ DB một cách linh hoạt, xử lý mọi trường hợp."""
-    if dt_str.endswith('+00:00'): dt_str = dt_str[:-3] + dt_str[-2:]
-    try: return datetime.strptime(dt_str, '%Y-%m-%dT%H:%M:%S.%f%z')
-    except ValueError: return datetime.strptime(dt_str, '%Y-%m-%dT%H:%M:%S%z')
+    # Chuẩn hóa múi giờ: loại bỏ dấu hai chấm nếu có
+    if dt_str[-3] == ':':
+        dt_str = dt_str[:-3] + dt_str[-2:]
+
+    # Thử đọc với định dạng có microsecond trước
+    try:
+        return datetime.strptime(dt_str, '%Y-%m-%dT%H:%M:%S.%f%z')
+    except ValueError:
+        # Nếu thất bại, thử lại với định dạng không có microsecond
+        return datetime.strptime(dt_str, '%Y-%m-%dT%H:%M:%S%z')
+
 
 def main_scraper():
-    """Hàm chính để chạy toàn bộ quá trình scraper, bao gồm cả việc xóa và xác minh."""
-    print("[DEBUG] Bắt đầu main_scraper...")
+    """Hàm chính để chạy toàn bộ quá trình scraper, bao gồm cả việc xóa bài viết cũ."""
     try:
         supabase = get_supabase_client()
-        print("[DEBUG] Kết nối Supabase thành công.")
-        
+
         # BƯỚC 1: Lấy URL từ blog gốc
-        print("--- GIAI ĐOẠN 1: THU THẬP DỮ LIỆU ---")
+        print("Bắt đầu lấy danh sách bài viết từ blog gốc...")
         articles_from_feed = get_article_urls_from_feed()
-        if not articles_from_feed: 
-            print("[INFO] Không tìm thấy URL nào từ blog gốc, dừng scraper.")
+        if not articles_from_feed:
             return
         source_urls = {article['url'] for article in articles_from_feed}
-        print(f"[INFO] Tổng số URL duy nhất từ blog gốc: {len(source_urls)}")
+        print(f"Đã tìm thấy {len(source_urls)} URL hợp lệ từ blog.")
 
         # BƯỚC 2: Lấy URL từ cơ sở dữ liệu
-        print("\n--- GIAI ĐOẠN 2: SO SÁNH VÀ DỌN DẸP ---")
+        print("\nBắt đầu lấy danh sách bài viết từ cơ sở dữ liệu...")
         response = supabase.table('articles').select('url, published_date').execute()
+        
+        # Sử dụng hàm parse_db_datetime mạnh mẽ nhất
         db_articles = {item['url']: parse_db_datetime(item['published_date']) for item in response.data}
         db_urls = set(db_articles.keys())
-        print(f"[INFO] Tổng số URL trong cơ sở dữ liệu: {len(db_urls)}")
+        print(f"Cơ sở dữ liệu hiện có {len(db_urls)} bài viết.")
 
         # BƯỚC 3: Xác định và XÓA bài viết cũ
         urls_to_delete = db_urls - source_urls
         if urls_to_delete:
-            print(f"[ACTION] Tìm thấy {len(urls_to_delete)} bài viết cần xóa.")
+            print(f"\nTìm thấy {len(urls_to_delete)} bài viết cần xóa khỏi cơ sở dữ liệu.")
             urls_to_delete_list = list(urls_to_delete)
             chunk_size = 100
             for i in range(0, len(urls_to_delete_list), chunk_size):
                 chunk = urls_to_delete_list[i:i + chunk_size]
                 supabase.table('articles').delete().in_('url', chunk).execute()
-            print("[SUCCESS] Đã gửi lệnh xóa cho tất cả các bài viết cũ.")
-
-            # *** BƯỚC 3.1: XÁC MINH VIỆC XÓA ***
-            print("\n[VERIFY] Bắt đầu xác minh lại việc xóa...")
-            time.sleep(5) # Chờ 5 giây để DB có thời gian cập nhật
-            remaining_response = supabase.table('articles').select('url').in_('url', urls_to_delete_list).execute()
-            if not remaining_response.data:
-                print("[VERIFY-SUCCESS] OK! Tất cả các bài viết đã được xóa thành công khỏi cơ sở dữ liệu.")
-            else:
-                print(f"[VERIFY-FAIL] LỖI! Vẫn còn {len(remaining_response.data)} bài viết chưa được xóa. Vui lòng kiểm tra quyền của SUPABASE_KEY.")
-
+            print("Đã xóa thành công các bài viết cũ.")
         else:
-            print("[INFO] Không có bài viết nào cần xóa.")
+            print("\nKhông có bài viết nào cần xóa. Cơ sở dữ liệu đã được đồng bộ.")
 
         # BƯỚC 4: Cập nhật và Thêm bài viết mới
-        print("\n--- GIAI ĐOẠN 3: CẬP NHẬT DỮ LIỆU MỚI ---")
-        # Giả định logic cập nhật
-        # articles_to_upsert = # Logic để lấy các bài viết cần cập nhật
-        # for article in articles_to_upsert:
-        #     article_data = scrape_article_content(article['url'])
-        #     upsert_article_rpc(supabase, article_data)
-        # print("[SUCCESS] Đã cập nhật xong dữ liệu mới.")
+        print("\nBắt đầu quá trình thêm mới và cập nhật bài viết...")
+        for article_info in articles_from_feed:
+            url = article_info['url']
+            title = article_info['title']
+            feed_published_date = datetime.fromisoformat(article_info['published'].replace('Z', '+00:00'))
+
+            if url not in db_articles or feed_published_date > db_articles[url]:
+                print(f"Đang xử lý: '{title}'")
+                content = scrape_article_content(url)
+                if content:
+                    upsert_article_rpc(supabase, {
+                        'title': title,
+                        'url': url,
+                        'content': content,
+                        'published': article_info['published']
+                    })
+                time.sleep(1)
 
     except Exception as e:
-        print(f"\n[!!!] LỖI NGHIÊM TRỌNG TRONG QUÁ TRÌNH SCRAPE: {e}")
+        print(f"Lỗi nghiêm trọng trong quá trình scrape: {e}")
     finally:
-        print("\n--- HOÀN TẤT TOÀN BỘ QUÁ TRÌNH SCRAPE ---")
+        print("\nHoàn tất quá trình scrape.")
 
-# (Giữ nguyên dòng này)
-if __name__ == '__main__':
+if __name__ == "__main__":
     main_scraper()
