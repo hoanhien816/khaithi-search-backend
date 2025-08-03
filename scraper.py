@@ -1,7 +1,7 @@
 import os
 import requests
 from bs4 import BeautifulSoup
-from datetime import datetime, timezone
+from datetime import datetime
 import re
 import time
 import json
@@ -23,10 +23,7 @@ def get_supabase_client():
     return create_client(SUPABASE_URL, SUPABASE_KEY)
 
 def get_article_urls_from_feed():
-    """
-    Lấy TOÀN BỘ URL bài viết từ RSS feed, tự động xử lý phân trang
-    để lấy hết tất cả các bài viết.
-    """
+    """Lấy TOÀN BỘ URL bài viết từ RSS feed, tự động xử lý phân trang."""
     print("Bắt đầu lấy toàn bộ URL từ RSS Feed, có xử lý phân trang...")
     all_urls = []
     start_index = 1
@@ -77,7 +74,6 @@ def scrape_article_content(url):
         soup = BeautifulSoup(response.text, 'html.parser')
         content_div = soup.find('div', class_='post-body')
         if not content_div:
-            print(f"Không tìm thấy nội dung cho URL: {url}. Vui lòng kiểm tra selector.")
             return None
         for unwanted_tag in content_div.find_all(['script', 'style', 'ins', 'iframe']):
             unwanted_tag.decompose()
@@ -90,27 +86,20 @@ def scrape_article_content(url):
 def upsert_article_rpc(supabase_client: Client, article_data: dict):
     """Gọi một PostgreSQL Function (RPC) trong Supabase để chèn hoặc cập nhật bài viết."""
     try:
-        # Chuyển đổi chuỗi ngày tháng từ feed sang đối tượng datetime
         published_date_obj = datetime.fromisoformat(article_data['published'].replace('Z', '+00:00'))
         params = {
             'p_title': article_data['title'],
             'p_url': article_data['url'],
             'p_content': article_data['content'],
-            'p_published_date': published_date_obj.isoformat() # Gửi đi ở định dạng chuẩn
+            'p_published_date': published_date_obj.isoformat()
         }
         supabase_client.rpc('upsert_article', params).execute()
-        return True
     except Exception as e:
         print(f"Lỗi RPC khi xử lý bài viết '{article_data['title']}': {e}")
-        return False
 
-# ======================================================================
-# *** HÀM MỚI ĐỂ SỬA LỖI ĐỌC NGÀY THÁNG ***
-# ======================================================================
 def parse_db_datetime(dt_str: str) -> datetime:
-    """Hàm chuyển đổi chuỗi ngày tháng từ DB một cách linh hoạt, chấp nhận cả +00:00 và +0000."""
+    """Hàm chuyển đổi chuỗi ngày tháng từ DB một cách linh hoạt."""
     if dt_str.endswith('+00:00'):
-        # Loại bỏ dấu hai chấm để tương thích với fromisoformat
         dt_str = dt_str[:-3] + dt_str[-2:]
     return datetime.fromisoformat(dt_str)
 
@@ -123,7 +112,6 @@ def main_scraper():
         print("Bắt đầu lấy danh sách bài viết từ blog gốc...")
         articles_from_feed = get_article_urls_from_feed()
         if not articles_from_feed:
-            print("Không có bài viết nào từ feed. Dừng quá trình.")
             return
         source_urls = {article['url'] for article in articles_from_feed}
         print(f"Đã tìm thấy {len(source_urls)} URL hợp lệ từ blog.")
@@ -131,10 +119,8 @@ def main_scraper():
         # BƯỚC 2: Lấy URL từ cơ sở dữ liệu
         print("\nBắt đầu lấy danh sách bài viết từ cơ sở dữ liệu...")
         response = supabase.table('articles').select('url, published_date').execute()
-        if response.error:
-            raise Exception(f"Lỗi khi lấy dữ liệu từ Supabase: {response.error.message}")
-            
-        # *** SỬA LỖI Ở ĐÂY: Sử dụng hàm parse_db_datetime mới ***
+        
+        # *** SỬA LỖI Ở ĐÂY: Truy cập dữ liệu đúng cách ***
         db_articles = {item['url']: parse_db_datetime(item['published_date']) for item in response.data}
         db_urls = set(db_articles.keys())
         print(f"Cơ sở dữ liệu hiện có {len(db_urls)} bài viết.")
@@ -144,17 +130,11 @@ def main_scraper():
         if urls_to_delete:
             print(f"\nTìm thấy {len(urls_to_delete)} bài viết cần xóa khỏi cơ sở dữ liệu.")
             urls_to_delete_list = list(urls_to_delete)
-            try:
-                print("Bắt đầu gửi yêu cầu xóa tới Supabase...")
-                chunk_size = 100
-                for i in range(0, len(urls_to_delete_list), chunk_size):
-                    chunk = urls_to_delete_list[i:i + chunk_size]
-                    delete_result = supabase.table('articles').delete().in_('url', chunk).execute()
-                    if delete_result.error:
-                        raise Exception(f"Lỗi Supabase khi xóa: {delete_result.error.message}")
-                print("Đã xóa thành công các bài viết cũ.")
-            except Exception as e:
-                print(f"Lỗi khi thực thi việc xóa: {e}")
+            chunk_size = 100
+            for i in range(0, len(urls_to_delete_list), chunk_size):
+                chunk = urls_to_delete_list[i:i + chunk_size]
+                supabase.table('articles').delete().in_('url', chunk).execute()
+            print("Đã xóa thành công các bài viết cũ.")
         else:
             print("\nKhông có bài viết nào cần xóa. Cơ sở dữ liệu đã được đồng bộ.")
 
